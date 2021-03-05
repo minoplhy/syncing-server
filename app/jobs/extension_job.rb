@@ -5,6 +5,10 @@ class ExtensionJob < ApplicationJob
   require 'uri'
 
   def perform(user_id, url, extension_id, item_ids = [], force_mute = false)
+    if ENV['INTERNAL_DNS_REROUTE_ENABLED'] == 'true'
+      url.sub! 'https://extensions.standardnotes.org', ENV['EXTENSIONS_SERVER']
+    end
+
     Octopus.using(:slave1) do
       user = User.find_by_uuid(user_id)
 
@@ -47,16 +51,21 @@ class ExtensionJob < ApplicationJob
         return
       end
 
+      response = nil
       sent = false
       begin
         response = http.request(req)
         sent = response.code.starts_with?('2')
       rescue StandardError => e
         Rails.logger.error "Failed to send a request to extensions server: #{e.message}"
-        Rails.logger.info "Response code was #{response.code}. Body sample: #{response.body[0, 100]}" if response
+        Rails.logger.debug "Response code was #{response.code}. Body sample: #{response.body[0, 100]}" if response
       end
 
       unless sent
+        if response
+          Rails.logger.debug "Response code was #{response.code}. Body sample: #{response.body[0, 100]}. URL sent: #{url}"
+        end
+
         UserMailer.failed_backup(
           user_id,
           extension_id,
